@@ -1,10 +1,20 @@
 package spark
 
+import elasticSearch.ElasticSearchConfig.{CreateIndexTweets, client}
+import org.apache.http.util.EntityUtils
 import org.apache.spark.sql.SparkSession
+import org.elasticsearch.client.Request
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val spark = SparkSession.builder
+    // عشان اعمل تست لل elastic
+    val response = client.performRequest(
+      new Request("GET", "/")
+    )
+    println(EntityUtils.toString(response.getEntity))
+    // اعمل تست اذا بنشئ اندكس او لا
+    CreateIndexTweets("try")
+    /*val spark = SparkSession.builder
       .appName("TwiStream")
       .master("local[*]")
       .getOrCreate()
@@ -23,6 +33,6 @@ object Main {
       .format("console")
       .start()
 
-    query.awaitTermination()
+    query.awaitTermination()*/
   }
 }

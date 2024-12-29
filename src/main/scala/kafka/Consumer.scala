@@ -1,20 +1,26 @@
 package kafka
 
-import com.johnsnowlabs.nlp.pretrained.PretrainedPipeline
 import org.apache.kafka.clients.consumer.KafkaConsumer
-import play.api.libs.json.{JsObject, Json}
+import java.util.{Collections, Properties}
+import scala.collection.JavaConverters._
+import play.api.libs.json.{Json, JsArray, JsObject}
+import elasticSearch.ElasticSearchConfig._
 import java.time.ZonedDateTime
 import java.time.format.{DateTimeFormatter, DateTimeParseException}
 import java.time.temporal.ChronoUnit
-import java.util.{Collections, Properties}
-import scala.collection.JavaConverters._
+import org.elasticsearch.client.Request
+import com.johnsnowlabs.nlp.pretrained.PretrainedPipeline
 
 object Consumer {
+  private val sentimentPipeline = PretrainedPipeline("analyze_sentiment", lang = "en")
+
   def main(args: Array[String]): Unit = {
-    val topic = "tweets_topic"
+    val topic = "try"
+    val indexName = "test"
     val batchSize = 100
-    val delay = 5000
+    val delay = 1000
     val maxTweets = 1000
+    createIndex(indexName)
 
     val props = new Properties()
     props.put("bootstrap.servers", "localhost:9092")
@@ -25,10 +31,10 @@ object Consumer {
 
     val consumer = new KafkaConsumer[String, String](props)
     consumer.subscribe(Collections.singletonList(topic))
-
     println(s"Consuming messages from topic: $topic")
 
     var tweetCount = 0
+    var processedBatch = 0
 
     try {
       while (tweetCount < maxTweets) {
@@ -37,33 +43,30 @@ object Consumer {
 
         for (record <- tweetsToProcess) {
           val tweetJson = Json.parse(record.value())
-
-          val geoJsonOpt = (tweetJson \ "geo").asOpt[JsObject]
-          val geoField = geoJsonOpt match {
-            case Some(geo) =>
-              val latitude = (geo \ "latitude").asOpt[Double].getOrElse(0.0)
-              val longitude = (geo \ "longitude").asOpt[Double].getOrElse(0.0)
-              Json.obj("geo" -> Json.arr(longitude, latitude))
-            case None => Json.obj()
-          }
-
           val sentiment = analyzeSentiment((tweetJson \ "text").asOpt[String].getOrElse(""))
+          val updatedTweetJson = {
+            val geoField = (tweetJson \ "geo").asOpt[JsArray].map(geoArray =>
+              Json.obj("geo" -> geoArray)
+            ).getOrElse(Json.obj())
 
-          val updatedTweetJson = Json.obj(
-            "created_at" -> convertToISO8601((tweetJson \ "created_at").asOpt[String].getOrElse("Unknown Date")),
-            "text" -> (tweetJson \ "text").asOpt[String].getOrElse("No text available"),
-            "hashtags" -> (tweetJson \ "hashtags").asOpt[Seq[String]].getOrElse(Seq.empty),
-            "location" -> (tweetJson \ "location").asOpt[String].getOrElse("Unknown location"),
-            "sentiment" -> sentiment
-          ) ++ geoField
-
-          println(s"Processed tweet: $updatedTweetJson")
+            Json.obj(
+              "created_at" -> Json.toJson(convertToISO8601((tweetJson \ "created_at").as[String])),
+              "text" -> Json.toJson((tweetJson \ "text").asOpt[String].getOrElse("No text available")),
+              "location" -> Json.toJson((tweetJson \ "location").asOpt[String].getOrElse("Unknown location")),
+              "hashtags" -> Json.toJson((tweetJson \ "hashtags").asOpt[Seq[String]].getOrElse(Seq.empty)),
+              "sentiment" -> Json.toJson(sentiment)
+            ) ++ geoField
+          }
+          addDocumentToElastic(indexName, updatedTweetJson)
+          println(updatedTweetJson)
         }
 
         tweetCount += tweetsToProcess.size
-        println(s"Processed $tweetCount tweets so far.")
+        processedBatch += 1
 
-        if (tweetCount < maxTweets) {
+        println(s"Processed $tweetCount tweets so far.")
+        if (processedBatch % (batchSize / 100) == 0) {
+          println(s"Batch processed. Pausing for $delay milliseconds...")
           Thread.sleep(delay)
         }
       }
@@ -72,9 +75,16 @@ object Consumer {
     } catch {
       case ex: Exception =>
         println(s"Error while consuming messages: ${ex.getMessage}")
+        ex.printStackTrace()
     } finally {
       consumer.close()
+      closeClient()
     }
+  }
+
+  private def analyzeSentiment(text: String): String = {
+    if (text.isEmpty) "Neutral"
+    else sentimentPipeline.annotate(text)("sentiment").headOption.getOrElse("Neutral")
   }
 
   private def convertToISO8601(dateString: String): String = {
@@ -83,13 +93,22 @@ object Consumer {
       val date = ZonedDateTime.parse(dateString, formatter)
       date.truncatedTo(ChronoUnit.SECONDS).toString
     } catch {
-      case _: DateTimeParseException => "Unknown Date"
+      case e: DateTimeParseException =>
+        println(s"Failed to parse date: $dateString")
+        "Unknown Date"
     }
   }
 
-  private val sentimentPipeline = PretrainedPipeline("analyze_sentiment", lang = "en")
-  private def analyzeSentiment(text: String): String = {
-    if (text.isEmpty) "Neutral"
-    else sentimentPipeline.annotate(text)("sentiment").headOption.getOrElse("Neutral")
+  private def addDocumentToElastic(indexName: String, document: JsObject): Unit = {
+    try {
+      val request = new Request("POST", s"/$indexName/_doc")
+      request.setJsonEntity(document.toString())
+      val response = client.performRequest(request)
+      println(s"Document added to Elasticsearch with response: ${response.getStatusLine}")
+    } catch {
+      case ex: Exception =>
+        println(s"Error while adding document to Elasticsearch: ${ex.getMessage}")
+        ex.printStackTrace()
+    }
   }
 }
