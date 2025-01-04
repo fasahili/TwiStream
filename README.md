@@ -9,3 +9,6 @@ This project implements a data pipeline for processing streaming tweets, enablin
 - **Scala**: For data processing scripts.
 - **Elasticsearch**: For storing processed tweets and metadata.
 - **Kibana**: For front-end visualization.
+## Links from which we took the information
+- <link href="https://stackoverflow.com/questions/27203498/how-to-get-started-with-elastic-search-using-scala-client">
+- <link href="https://www.elastic.co/guide/en/elasticsearch/reference/current/date.html?utm_source=chatgpt.com">
