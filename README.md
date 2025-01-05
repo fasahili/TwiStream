@@ -112,4 +112,6 @@ Steps to Execute
 - [How to get started with ElasticSearch using Scala client](https://stackoverflow.com/questions/27203498/how-to-get-started-with-elastic-search-using-scala-client)
 - [Elasticsearch Date Format Documentation](https://www.elastic.co/guide/en/elasticsearch/reference/current/date.html?utm_source=chatgpt.com)
 ![image](https://github.com/user-attachments/assets/b5b89a67-748d-4faa-8d46-f4a6600eb011)
+![image](https://github.com/user-attachments/assets/b98004a7-0508-462a-85eb-3dde5b822faa)
+
 
